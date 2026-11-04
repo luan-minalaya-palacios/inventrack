@@ -1,0 +1,455 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0f1e3d">
+<title>InvenTrack · Escáner</title>
+<!--
+  INVENTRACK — ESCÁNER EN VIVO
+  Página independiente (fuera de Apps Script) para escanear códigos de barras con la cámara
+  del celular en tiempo real. Envía cada lectura a tu sistema InvenTrack (Code.gs → doPost).
+  Publicar junto al archivo html5-qrcode.min.js (ver guía).
+-->
+<style>
+  :root { --azul: #1d4ed8; --azul2: #2563eb; --fondo: #0f1e3d; --ok: #047857; --err: #be123c; --gris: #64748b; }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; height: 100%; font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: #0f172a; background: #f1f5f9; }
+  button { font: inherit; cursor: pointer; }
+  .pantalla { min-height: 100%; display: flex; flex-direction: column; }
+  .centro { flex: 1; display: flex; align-items: center; justify-content: center; padding: 20px; background: linear-gradient(135deg, #0f1e3d, #1e40af 55%, #2563eb); }
+  .caja { width: 100%; max-width: 380px; background: #fff; border-radius: 24px; padding: 28px; box-shadow: 0 20px 50px rgba(0,0,0,.25); }
+  .logo { width: 56px; height: 56px; border-radius: 16px; background: var(--azul2); color: #fff; display: flex; align-items: center; justify-content: center; margin: 0 auto 10px; }
+  h1 { font-size: 22px; margin: 0; text-align: center; }
+  .sub { text-align: center; color: var(--gris); font-size: 14px; margin: 4px 0 20px; }
+  label { display: block; font-size: 12px; font-weight: 600; color: var(--gris); text-transform: uppercase; letter-spacing: .03em; margin: 12px 0 4px; }
+  input { width: 100%; border: 1px solid #cbd5e1; border-radius: 12px; padding: 12px; font-size: 16px; }
+  input:focus { outline: none; border-color: var(--azul2); box-shadow: 0 0 0 3px rgba(37,99,235,.2); }
+  .btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; border: 0; border-radius: 12px; padding: 13px 16px; font-weight: 600; font-size: 15px; }
+  .btn-p { background: var(--azul); color: #fff; width: 100%; margin-top: 18px; }
+  .btn-l { background: #fff; color: #334155; border: 1px solid #e2e8f0; }
+  .btn:disabled { opacity: .55; }
+  .error { background: #fff1f2; color: var(--err); border-radius: 12px; padding: 10px 12px; font-size: 14px; margin-top: 12px; }
+  .nota { font-size: 12px; color: var(--gris); margin-top: 14px; text-align: center; }
+  .barra { background: var(--fondo); color: #fff; padding: 14px 16px; padding-top: calc(14px + env(safe-area-inset-top)); display: flex; align-items: center; gap: 12px; }
+  .barra .t { flex: 1; min-width: 0; }
+  .barra .t b { display: block; font-size: 16px; }
+  .barra .t span { font-size: 12px; color: #cbd5e1; display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .icono-btn { background: rgba(255,255,255,.12); color: #fff; border: 0; border-radius: 12px; width: 42px; height: 42px; display: flex; align-items: center; justify-content: center; }
+  .icono-btn.on { background: #facc15; color: #0f172a; }
+  .lista { padding: 16px; display: grid; gap: 10px; }
+  .ses { background: #fff; border: 1px solid #e2e8f0; border-radius: 16px; padding: 14px 16px; text-align: left; width: 100%; }
+  .ses b { display: block; }
+  .ses span { font-size: 13px; color: var(--gris); }
+  .vacio { text-align: center; color: #94a3b8; padding: 30px 10px; font-size: 14px; }
+
+  /* Escáner */
+  #esc { position: fixed; inset: 0; background: #000; display: flex; flex-direction: column; }
+  #camBox { position: relative; flex: 1; overflow: hidden; background: #000; }
+  #camBox video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+  #h5 { position: absolute !important; inset: 0; width: 100% !important; height: 100% !important; display: flex !important; align-items: center; justify-content: center; }
+  #h5 video { position: absolute; left: 0; top: 50%; transform: translateY(-50%); width: 100% !important; height: auto !important; max-height: 100%; }
+  #qr-shaded-region, #h5 > div:not(#qr-shaded-region) { display: none !important; }   /* se usa el marco propio */
+  .mira { position: absolute; left: 8%; right: 8%; top: 50%; height: 36%; transform: translateY(-50%); border-radius: 16px; border: 3px solid rgba(255,255,255,.9); box-shadow: 0 0 0 9999px rgba(0,0,0,.38); pointer-events: none; transition: border-color .15s; }
+  .mira::after { content: ""; position: absolute; left: 6%; right: 6%; top: 50%; height: 2px; background: rgba(239,68,68,.85); animation: barrido 1.6s ease-in-out infinite; }
+  @keyframes barrido { 0%,100% { transform: translateY(-28px); } 50% { transform: translateY(28px); } }
+  .mira.ok { border-color: #22c55e; } .mira.err { border-color: #ef4444; }
+  #aviso { position: absolute; left: 12px; right: 12px; top: calc(12px + env(safe-area-inset-top)); border-radius: 16px; padding: 12px 14px; color: #fff; font-size: 15px; display: none; box-shadow: 0 10px 30px rgba(0,0,0,.3); }
+  #estadoCam { position: absolute; left: 0; right: 0; top: 58%; text-align: center; color: #e2e8f0; font-size: 14px; padding: 0 24px; }
+  .panel { background: #fff; border-radius: 20px 20px 0 0; padding: 14px 16px; padding-bottom: calc(14px + env(safe-area-inset-bottom)); }
+  .fila { display: flex; align-items: center; gap: 10px; }
+  .cant { display: flex; align-items: center; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden; }
+  .cant button { width: 42px; height: 42px; border: 0; background: #f8fafc; font-size: 20px; }
+  .cant input { width: 58px; border: 0; text-align: center; padding: 8px 0; border-radius: 0; font-weight: 700; }
+  .resumen { flex: 1; text-align: right; font-size: 13px; color: var(--gris); }
+  .resumen b { font-size: 20px; color: #0f172a; display: block; }
+  #ultimos { margin-top: 10px; max-height: 26vh; overflow: auto; }
+  .lec { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-top: 1px solid #f1f5f9; font-size: 14px; }
+  .lec .n { flex: 1; min-width: 0; }
+  .lec .n b { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .lec .n span { font-size: 12px; color: var(--gris); }
+  .pill { border-radius: 999px; padding: 2px 8px; font-size: 12px; font-weight: 600; white-space: nowrap; }
+  .manual { display: flex; gap: 8px; margin-top: 10px; }
+  .manual input { padding: 10px; font-size: 15px; }
+  .spin { animation: girar 1s linear infinite; display: inline-flex; }
+  @keyframes girar { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+<div id="app"></div>
+
+<script>
+/* =========================================================
+ * CONFIGURACIÓN
+ * Opcional: pega aquí la URL /exec de tu sistema para no tener que escribirla.
+ * Si la dejas vacía, la página la recibe al abrirse desde InvenTrack o te la pide.
+ * ========================================================= */
+const API_FIJA = '';
+
+/* =========================================================
+ * ESTADO
+ * ========================================================= */
+const E = {
+  api: '', token: '', user: null, sesion: '', productos: 0,
+  stream: null, detector: null, h5: null, timer: null, torch: false,
+  ultimo: '', vistoT: 0, cola: [], enviando: false, lecturas: [], contados: 0
+};
+const $ = function (id) { return document.getElementById(id); };
+function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+function guardar(k, v) { try { v === null || v === '' ? localStorage.removeItem(k) : localStorage.setItem(k, v); } catch (e) {} }
+function leer(k) { try { return localStorage.getItem(k) || ''; } catch (e) { return ''; } }
+function num(n) { return new Intl.NumberFormat('es-PE', { maximumFractionDigits: 3 }).format(Number(n) || 0); }
+
+const IC = {
+  logo: '<path d="M21 10V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l2-1.14"/><path d="m7.5 4.27 9 5.15"/><polyline points="3.29 7 12 12 20.71 7"/><line x1="12" x2="12" y1="22" y2="12"/><circle cx="18.5" cy="15.5" r="2.5"/><path d="M20.27 17.27 22 19"/>',
+  x: '<path d="M18 6 6 18"/><path d="m6 6 12 12"/>',
+  flash: '<path d="M18 6c0 2-2 2-2 4v10a2 2 0 0 1-2 2h-4a2 2 0 0 1-2-2V10c0-2-2-2-2-4V2h12z"/><line x1="6" x2="18" y1="6" y2="6"/><line x1="12" x2="12" y1="12" y2="12"/>',
+  salir: '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" x2="9" y1="12" y2="12"/>',
+  mas: '<path d="M5 12h14"/><path d="M12 5v14"/>',
+  carga: '<path d="M21 12a9 9 0 1 1-6.219-8.56"/>',
+  scan: '<path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/><path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/><path d="M8 7v10"/><path d="M12 7v10"/><path d="M17 7v10"/>'
+};
+function icon(n, s) { s = s || 20; return '<svg width="' + s + '" height="' + s + '" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' + IC[n] + '</svg>'; }
+
+/* =========================================================
+ * COMUNICACIÓN CON INVENTRACK (Apps Script → doPost)
+ * ========================================================= */
+function llamar(body) {
+  const ctrl = ('AbortController' in window) ? new AbortController() : null;
+  const t = setTimeout(function () { if (ctrl) ctrl.abort(); }, 30000);
+  return fetch(E.api, {
+    method: 'POST', redirect: 'follow', signal: ctrl ? ctrl.signal : undefined,
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' },   // evita la verificación CORS previa
+    body: JSON.stringify(body)
+  }).then(function (r) { return r.text(); }).then(function (txt) {
+    clearTimeout(t);
+    let o;
+    try { o = JSON.parse(txt); } catch (e) {
+      throw new Error('El sistema no respondió como se esperaba. Revisa que la URL termine en /exec, que esté implementada como "Cualquier persona" y que hayas publicado una nueva versión.');
+    }
+    if (!o.ok) {
+      if (o.error === 'SESION_EXPIRADA') { guardar('esc_token', null); E.token = ''; throw new Error('Tu sesión expiró. Ingresa nuevamente.'); }
+      throw new Error(o.error);
+    }
+    return o.data;
+  }, function (err) {
+    clearTimeout(t);
+    throw new Error(err && err.name === 'AbortError' ? 'El sistema tardó demasiado en responder. Revisa tu conexión.' : 'Sin conexión con el sistema. Revisa tu internet y la URL.');
+  });
+}
+function api(action, payload) { return llamar({ fn: 'api', token: E.token, action: action, payload: payload || {} }); }
+
+/* =========================================================
+ * PANTALLAS
+ * ========================================================= */
+function pantallaConfig(msg) {
+  $('app').innerHTML = '<div class="pantalla"><div class="centro"><form class="caja" onsubmit="return guardarConfig(event)">' +
+    '<div class="logo">' + icon('logo', 28) + '</div><h1>Escáner InvenTrack</h1><p class="sub">Conecta con tu sistema</p>' +
+    '<label>URL de tu sistema (termina en /exec)</label><input id="cfgApi" type="url" required placeholder="https://script.google.com/macros/s/…/exec" value="' + esc(E.api) + '">' +
+    (msg ? '<div class="error">' + esc(msg) + '</div>' : '') +
+    '<button class="btn btn-p" id="cfgBtn">Conectar</button>' +
+    '<p class="nota">Es el mismo link con el que abres InvenTrack. Si abres el escáner desde el botón “Escanear en vivo” de InvenTrack, esto se completa solo.</p>' +
+    '</form></div></div>';
+}
+function guardarConfig(e) {
+  e.preventDefault();
+  const url = $('cfgApi').value.trim();
+  if (!/^https:\/\/script\.google(usercontent)?\.com\/.+\/exec/.test(url)) { pantallaConfig('La URL debe ser la de tu implementación de Apps Script y terminar en /exec.'); return false; }
+  E.api = url; guardar('esc_api', url);
+  $('cfgBtn').disabled = true; $('cfgBtn').innerHTML = '<span class="spin">' + icon('carga') + '</span> Verificando…';
+  llamar({ fn: 'ping' }).then(function () { pantallaLogin(); }).catch(function (err) { pantallaConfig(err.message); });
+  return false;
+}
+
+function pantallaLogin(msg) {
+  $('app').innerHTML = '<div class="pantalla"><div class="centro"><form class="caja" onsubmit="return ingresar(event)">' +
+    '<div class="logo">' + icon('logo', 28) + '</div><h1>Escáner InvenTrack</h1><p class="sub">Toma de inventario en vivo</p>' +
+    '<label>Correo</label><input id="lgEmail" type="email" autocomplete="username" required>' +
+    '<label>Contraseña</label><input id="lgPass" type="password" autocomplete="current-password" required>' +
+    (msg ? '<div class="error">' + esc(msg) + '</div>' : '') +
+    '<button class="btn btn-p" id="lgBtn">Ingresar</button>' +
+    '<p class="nota"><a href="#" onclick="pantallaConfig();return false" style="color:#64748b">Cambiar sistema</a></p>' +
+    '</form></div></div>';
+}
+function ingresar(e) {
+  e.preventDefault();
+  $('lgBtn').disabled = true; $('lgBtn').innerHTML = '<span class="spin">' + icon('carga') + '</span> Validando…';
+  llamar({ fn: 'login', correo: $('lgEmail').value, password: $('lgPass').value }).then(function (d) {
+    E.token = d.token; E.user = d.user; guardar('esc_token', d.token);
+    pantallaSesiones();
+  }).catch(function (err) { pantallaLogin(err.message); });
+  return false;
+}
+
+function cerrarSesion() {
+  detener();
+  if (E.token) llamar({ fn: 'logout', token: E.token }).catch(function () {});
+  E.token = ''; E.user = null; E.sesion = ''; guardar('esc_token', null);
+  pantallaLogin();
+}
+
+function pantallaSesiones(msg) {
+  detener();
+  $('app').innerHTML = '<div class="pantalla"><div class="barra"><div class="logo" style="width:40px;height:40px;margin:0;border-radius:12px">' + icon('logo', 22) + '</div>' +
+    '<div class="t"><b>Sesiones de conteo</b><span>' + esc(E.user ? E.user.nombre + ' · ' + E.user.rol : '') + '</span></div>' +
+    '<button class="icono-btn" onclick="cerrarSesion()" title="Salir">' + icon('salir') + '</button></div>' +
+    '<div class="lista" id="lista"><div class="vacio"><span class="spin">' + icon('carga', 28) + '</span></div></div></div>';
+  api('tomaListar').then(function (l) {
+    const abiertas = l.filter(function (s) { return s.Estado === 'Abierta'; });
+    $('lista').innerHTML = (msg ? '<div class="error" style="margin:0">' + esc(msg) + '</div>' : '') +
+      '<button class="btn btn-p" style="margin-top:0" onclick="nuevaSesion(this)">' + icon('mas') + ' Nueva sesión de conteo</button>' +
+      (abiertas.length ? abiertas.map(function (s) {
+        return '<button class="ses" data-id="' + esc(s.ID_Sesion) + '" onclick="abrirEscaner(this.dataset.id)"><b>' + esc(s.ID_Sesion) + '</b>' +
+          '<span>' + new Date(s.Fecha).toLocaleString('es-PE', { dateStyle: 'short', timeStyle: 'short' }) + ' · ' + esc(s.Usuario) + ' · ' + s.Items + ' productos contados</span></button>';
+      }).join('') : '<div class="vacio">No hay sesiones abiertas. Crea una nueva para empezar a contar.</div>');
+  }).catch(function (err) {
+    if (!E.token) return pantallaLogin(err.message);
+    $('lista').innerHTML = '<div class="error">' + esc(err.message) + '</div><button class="btn btn-l" onclick="pantallaSesiones()">Reintentar</button>';
+  });
+}
+function nuevaSesion(btn) {
+  btn.disabled = true; btn.innerHTML = '<span class="spin">' + icon('carga') + '</span> Creando…';
+  api('tomaAbrir').then(function (r) { abrirEscaner(r.ID_Sesion); }).catch(function (err) { pantallaSesiones(err.message); });
+}
+
+/* =========================================================
+ * ESCÁNER EN VIVO
+ * ========================================================= */
+function abrirEscaner(id) {
+  E.sesion = id; E.lecturas = []; E.cola = []; E.ultimo = ''; E.contados = 0;
+  $('app').innerHTML = '<div id="esc">' +
+    '<div class="barra"><div class="t"><b>Escaneando</b><span>' + esc(id) + '</span></div>' +
+      '<button class="icono-btn" id="btnTorch" onclick="linterna()" title="Linterna" style="display:none">' + icon('flash') + '</button>' +
+      '<button class="icono-btn" onclick="pantallaSesiones()" title="Terminar">' + icon('x') + '</button></div>' +
+    '<div id="camBox"><div class="mira" id="mira"></div><div id="estadoCam"><span class="spin">' + icon('carga', 26) + '</span><br>Abriendo cámara…</div><div id="aviso"></div></div>' +
+    '<div class="panel">' +
+      '<div class="fila">' +
+        '<div><div style="font-size:11px;font-weight:600;color:#64748b;text-transform:uppercase;margin-bottom:4px">Cantidad por lectura</div>' +
+        '<div class="cant"><button onclick="cambiarCant(-1)">−</button><input id="qty" type="number" min="1" step="any" value="1" inputmode="decimal"><button onclick="cambiarCant(1)">+</button></div></div>' +
+        '<div class="resumen"><b id="cnt">0</b>lecturas en esta sesión</div>' +
+      '</div>' +
+      '<form class="manual" onsubmit="return manual(event)"><input id="manualIn" placeholder="Escribir código (opcional)" autocomplete="off"><button class="btn btn-l" style="padding:10px 14px">' + icon('mas') + '</button></form>' +
+      '<div id="ultimos"></div>' +
+    '</div></div>';
+  pintarUltimos();
+  iniciarCamara();
+}
+
+function cambiarCant(d) {
+  const v = Math.max(1, (Number($('qty').value) || 1) + d);
+  $('qty').value = v;
+}
+
+function estadoCam(html) { const el = $('estadoCam'); if (el) { el.innerHTML = html; el.style.display = html ? 'block' : 'none'; } }
+
+const FORMATOS = ['code_128', 'code_39', 'code_93', 'ean_13', 'ean_8', 'upc_a', 'upc_e', 'itf', 'codabar', 'qr_code', 'data_matrix'];
+
+function iniciarCamara() {
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    estadoCam('Este navegador no permite usar la cámara. Abre la página en Chrome (Android) o Safari (iPhone).'); return;
+  }
+  detectorNativo().then(function (det) {
+    return det ? iniciarNativo(det) : cargarLibreria().then(function (ok) {
+      if (!ok) throw { name: 'Lib' };
+      return iniciarH5();
+    });
+  }).then(function () {
+    estadoCam('');
+    activarLinterna();
+  }).catch(function (err) {
+    const n = (err && err.name) || '', t = String((err && err.message) || err || '');
+    let m = 'No se pudo abrir la cámara: ' + esc(t);
+    if (n === 'Lib') m = 'No se pudo cargar el lector de códigos. Revisa que el archivo html5-qrcode.min.js esté publicado junto a esta página.';
+    else if (n === 'NotAllowedError' || /NotAllowed|Permission/i.test(t)) m = 'Permiso de cámara denegado.<br>Toca el candado 🔒 junto a la dirección, permite la <b>Cámara</b> y recarga la página.';
+    else if (n === 'NotFoundError') m = 'No se encontró ninguna cámara.';
+    else if (n === 'NotReadableError') m = 'La cámara está ocupada por otra app. Ciérrala y vuelve a intentar.';
+    estadoCam(m + '<br><br><button class="btn btn-l" onclick="iniciarCamara()">Reintentar</button>');
+  });
+}
+
+function detectorNativo() {
+  if (!('BarcodeDetector' in window)) return Promise.resolve(null);
+  return BarcodeDetector.getSupportedFormats().then(function (sop) {
+    const f = FORMATOS.filter(function (x) { return sop.indexOf(x) !== -1; });
+    return f.length ? new BarcodeDetector({ formats: f }) : null;
+  }).catch(function () { return null; });
+}
+
+/* Lector nativo del navegador (Chrome en Android): rápido y sin descargas */
+function iniciarNativo(det) {
+  return navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } }, audio: false })
+    .then(function (stream) {
+      E.stream = stream; E.detector = det;
+      const v = document.createElement('video');
+      v.setAttribute('playsinline', ''); v.muted = true; v.autoplay = true; v.srcObject = stream;
+      $('camBox').insertBefore(v, $('camBox').firstChild);
+      return v.play().then(function () {
+        let ocupado = false;
+        const ciclo = function () {
+          if (!E.stream) return;
+          if (!ocupado && v.readyState >= 2) {
+            ocupado = true;
+            det.detect(v).then(function (codes) {
+              if (codes && codes.length) detectado(codes[0].rawValue);
+            }).catch(function () {}).then(function () { ocupado = false; });
+          }
+          E.timer = setTimeout(ciclo, 120);
+        };
+        ciclo();
+      });
+    });
+}
+
+/* Librería html5-qrcode (iPhone y navegadores sin lector nativo). Se carga del mismo sitio, sin CDN. */
+function cargarLibreria() {
+  if (window.Html5Qrcode) return Promise.resolve(true);
+  const rutas = ['html5-qrcode.min.js', 'https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js', 'https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js'];
+  return rutas.reduce(function (p, url) {
+    return p.then(function (ok) {
+      if (ok) return true;
+      return new Promise(function (res) {
+        const s = document.createElement('script'); s.src = url;
+        s.onload = function () { res(!!window.Html5Qrcode); }; s.onerror = function () { res(false); };
+        document.head.appendChild(s);
+      });
+    });
+  }, Promise.resolve(false));
+}
+function iniciarH5() {
+  const box = document.createElement('div'); box.id = 'h5';
+  $('camBox').insertBefore(box, $('camBox').firstChild);
+  E.h5 = new Html5Qrcode('h5', { verbose: false });
+  return E.h5.start({ facingMode: 'environment' },
+    { fps: 12 },   // analiza el cuadro completo: más fiable que limitarlo a una zona
+    function (code) { detectado(code); }, function () {});
+}
+
+function detener() {
+  clearTimeout(E.timer); E.timer = null;
+  if (E.stream) { E.stream.getTracks().forEach(function (t) { t.stop(); }); E.stream = null; }
+  if (E.h5) { const h = E.h5; E.h5 = null; try { h.stop().then(function () { h.clear(); }).catch(function () {}); } catch (e) {} }
+  E.torch = false;
+}
+
+function activarLinterna() {
+  try {
+    let caps = null;
+    if (E.stream) caps = E.stream.getVideoTracks()[0].getCapabilities();
+    else if (E.h5 && E.h5.getRunningTrackCapabilities) caps = E.h5.getRunningTrackCapabilities();
+    if (caps && caps.torch && $('btnTorch')) $('btnTorch').style.display = 'flex';
+  } catch (e) {}
+}
+function linterna() {
+  E.torch = !E.torch;
+  const c = { advanced: [{ torch: E.torch }] };
+  const p = E.stream ? E.stream.getVideoTracks()[0].applyConstraints(c) : (E.h5 ? E.h5.applyVideoConstraints(c) : Promise.reject());
+  Promise.resolve(p).then(function () { $('btnTorch').classList.toggle('on', E.torch); }).catch(function () { E.torch = false; });
+}
+
+/* Un mismo código solo se vuelve a contar cuando sale del cuadro y vuelve a entrar */
+function detectado(code) {
+  code = String(code || '').trim(); if (!code) return;
+  const ahora = Date.now();
+  const repetido = code === E.ultimo && (ahora - E.vistoT) < 1200;
+  E.vistoT = ahora;
+  if (repetido) return;
+  E.ultimo = code;
+  encolar(code);
+}
+
+function manual(e) {
+  e.preventDefault();
+  const c = $('manualIn').value.trim(); if (!c) return false;
+  $('manualIn').value = ''; encolar(c); $('manualIn').blur();
+  return false;
+}
+
+function encolar(code) {
+  const qty = Number($('qty') ? $('qty').value : 1) || 1;
+  const item = { code: code, qty: qty, estado: 'enviando', id: Date.now() + Math.random() };
+  E.lecturas.unshift(item); if (E.lecturas.length > 30) E.lecturas.pop();
+  pip(true, true);
+  mira('ok');
+  pintarUltimos();
+  E.cola.push(item);
+  procesarCola();
+}
+
+function procesarCola() {
+  if (E.enviando || !E.cola.length) return;
+  E.enviando = true;
+  const it = E.cola.shift();
+  api('tomaEscanear', { sesion: E.sesion, codigo: it.code, cantidad: it.qty }).then(function (r) {
+    it.estado = 'ok'; it.r = r; E.contados++;
+    pip(true); vibrar(true);
+    aviso('✔ ' + esc(r.Nombre) + '<br><small>Contado ' + num(r.Cantidad_Escaneada) + ' ' + esc(r.Tipo_Unidad) + ' · sistema ' + num(r.Cantidad_Sistema) + '</small>', '#047857');
+  }).catch(function (err) {
+    it.estado = 'error'; it.error = err.message;
+    pip(false); vibrar(false); mira('err');
+    aviso('✖ ' + esc(it.code) + '<br><small>' + esc(err.message) + '</small>', '#be123c', 3500);
+    if (!E.token) { setTimeout(function () { detener(); pantallaLogin(err.message); }, 1500); }
+  }).then(function () {
+    E.enviando = false; pintarUltimos(); procesarCola();
+  });
+}
+
+function pintarUltimos() {
+  if (!$('ultimos')) return;
+  $('cnt').textContent = E.contados;
+  $('ultimos').innerHTML = E.lecturas.slice(0, 15).map(function (l) {
+    let der, sub;
+    if (l.estado === 'enviando') { der = '<span class="spin" style="color:#64748b">' + icon('carga', 16) + '</span>'; sub = 'Enviando…'; }
+    else if (l.estado === 'ok') {
+      const d = l.r.Diferencia, col = d === 0 ? '#047857' : (d < 0 ? '#be123c' : '#1d4ed8');
+      der = '<span class="pill" style="background:#eff6ff;color:#1d4ed8">+' + num(l.qty) + '</span>';
+      sub = 'Contado ' + num(l.r.Cantidad_Escaneada) + ' / sistema ' + num(l.r.Cantidad_Sistema) + ' · <b style="color:' + col + '">' + (d > 0 ? '+' : '') + num(d) + '</b>';
+    } else { der = '<span class="pill" style="background:#fff1f2;color:#be123c">Error</span>'; sub = esc(l.error); }
+    return '<div class="lec"><div class="n"><b>' + esc(l.r ? l.r.Nombre : l.code) + '</b><span>' + esc(l.code) + ' · ' + sub + '</span></div>' + der + '</div>';
+  }).join('') || '<p class="vacio" style="padding:10px">Apunta la cámara a un código de barras.</p>';
+}
+
+/* --- Respuesta inmediata: sonido, vibración, color --- */
+function pip(ok, corto) {
+  try {
+    E.audio = E.audio || new (window.AudioContext || window.webkitAudioContext)();
+    if (E.audio.state === 'suspended') E.audio.resume();
+    const o = E.audio.createOscillator(), g = E.audio.createGain();
+    o.type = ok ? 'sine' : 'square'; o.frequency.value = ok ? (corto ? 880 : 1320) : 220; g.gain.value = corto ? 0.05 : 0.09;
+    o.connect(g); g.connect(E.audio.destination); o.start(); o.stop(E.audio.currentTime + (ok ? (corto ? 0.05 : 0.09) : 0.3));
+  } catch (e) {}
+}
+function vibrar(ok) { try { if (navigator.vibrate) navigator.vibrate(ok ? 60 : [100, 60, 100]); } catch (e) {} }
+function mira(t) { const m = $('mira'); if (!m) return; m.className = 'mira ' + t; clearTimeout(E.tMira); E.tMira = setTimeout(function () { m.className = 'mira'; }, 500); }
+function aviso(html, color, ms) {
+  const a = $('aviso'); if (!a) return;
+  a.innerHTML = html; a.style.background = color; a.style.display = 'block';
+  clearTimeout(E.tAviso); E.tAviso = setTimeout(function () { a.style.display = 'none'; }, ms || 1800);
+}
+
+document.addEventListener('visibilitychange', function () {
+  // al volver a la app, reanuda la cámara si se había detenido
+  if (!document.hidden && E.sesion && $('camBox') && !E.stream && !E.h5) iniciarCamara();
+});
+
+/* =========================================================
+ * INICIO: acepta #t=token&s=sesion&api=url (enviado por InvenTrack)
+ * ========================================================= */
+(function arrancar() {
+  const h = {};
+  location.hash.replace(/^#/, '').split('&').forEach(function (kv) { const p = kv.split('='); if (p[0]) h[p[0]] = decodeURIComponent(p[1] || ''); });
+  if (location.hash) history.replaceState(null, '', location.pathname + location.search); // no deja el token en la barra
+  E.api = API_FIJA || h.api || leer('esc_api');
+  if (h.api) guardar('esc_api', h.api);
+  E.token = h.t || leer('esc_token');
+  if (h.t) guardar('esc_token', h.t);
+  if (!E.api) return pantallaConfig();
+  if (!E.token) return pantallaLogin();
+  $('app').innerHTML = '<div class="pantalla"><div class="centro"><div style="color:#fff;text-align:center"><span class="spin">' + icon('carga', 32) + '</span><p>Conectando…</p></div></div></div>';
+  api('sesion').then(function (u) {
+    E.user = u;
+    if (h.s) abrirEscaner(h.s); else pantallaSesiones();
+  }).catch(function (err) { guardar('esc_token', null); E.token = ''; pantallaLogin(err.message === 'Tu sesión expiró. Ingresa nuevamente.' ? '' : err.message); });
+})();
+</script>
+</body>
+</html>
