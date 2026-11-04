@@ -375,18 +375,39 @@ function encolar(code) {
   procesarCola();
 }
 
+/* Envía las lecturas pendientes. Si se escanearon varias mientras viajaba la anterior,
+ * van todas juntas en una sola llamada (mucho más rápido). */
 function procesarCola() {
   if (E.enviando || !E.cola.length) return;
   E.enviando = true;
-  const it = E.cola.shift();
-  api('tomaEscanear', { sesion: E.sesion, codigo: it.code, cantidad: it.qty }).then(function (r) {
-    it.estado = 'ok'; it.r = r; E.contados++;
-    pip(true); vibrar(true);
-    aviso('✔ ' + esc(r.Nombre) + '<br><small>Contado ' + num(r.Cantidad_Escaneada) + ' ' + esc(r.Tipo_Unidad) + ' · sistema ' + num(r.Cantidad_Sistema) + '</small>', '#047857');
+  const lote = E.cola.splice(0, 100);
+  const enviar = E.sinLotes
+    ? api('tomaEscanear', { sesion: E.sesion, codigo: lote[0].code, cantidad: lote[0].qty }).then(function (r) { return [{ ok: true, fila: r }]; }, function (err) { return [{ ok: false, error: err.message }]; })
+    : api('tomaEscanearLote', { sesion: E.sesion, lecturas: lote.map(function (it) { return { codigo: it.code, cantidad: it.qty }; }) });
+  if (E.sinLotes && lote.length > 1) E.cola = lote.slice(1).concat(E.cola);
+  enviar.then(function (res) {
+    const items = E.sinLotes ? [lote[0]] : lote;
+    let ultimoOk = null, ultimoErr = null;
+    items.forEach(function (it, i) {
+      const r = res[i] || { ok: false, error: 'Sin respuesta' };
+      if (r.ok) { it.estado = 'ok'; it.r = r.fila; E.contados++; ultimoOk = r.fila; }
+      else { it.estado = 'error'; it.error = r.error; ultimoErr = it; }
+    });
+    if (ultimoErr) {
+      pip(false); vibrar(false); mira('err');
+      aviso('✖ ' + esc(ultimoErr.code) + '<br><small>' + esc(ultimoErr.error) + '</small>', '#be123c', 3500);
+    } else if (ultimoOk) {
+      pip(true); vibrar(true);
+      aviso('✔ ' + esc(ultimoOk.Nombre) + (items.length > 1 ? ' <small>(+' + (items.length - 1) + ' más)</small>' : '') +
+        '<br><small>Contado ' + num(ultimoOk.Cantidad_Escaneada) + ' ' + esc(ultimoOk.Tipo_Unidad) + ' · sistema ' + num(ultimoOk.Cantidad_Sistema) + '</small>', '#047857');
+    }
   }).catch(function (err) {
-    it.estado = 'error'; it.error = err.message;
+    if (/no disponible/i.test(err.message) && !E.sinLotes) {   // sistema sin lotes (versión anterior): una por una
+      E.sinLotes = true; E.cola = lote.concat(E.cola); return;
+    }
+    lote.forEach(function (it) { it.estado = 'error'; it.error = err.message; });
     pip(false); vibrar(false); mira('err');
-    aviso('✖ ' + esc(it.code) + '<br><small>' + esc(err.message) + '</small>', '#be123c', 3500);
+    aviso('✖ ' + lote.length + ' lectura(s) sin registrar<br><small>' + esc(err.message) + '</small>', '#be123c', 3500);
     if (!E.token) { setTimeout(function () { detener(); pantallaLogin(err.message); }, 1500); }
   }).then(function () {
     E.enviando = false; pintarUltimos(); procesarCola();
