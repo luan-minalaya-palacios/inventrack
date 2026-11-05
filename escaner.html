@@ -17,7 +17,7 @@
   html, body { margin: 0; height: 100%; font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: #0f172a; background: #f1f5f9; }
   button { font: inherit; cursor: pointer; }
   .pantalla { min-height: 100%; display: flex; flex-direction: column; }
-  .centro { flex: 1; display: flex; align-items: center; justify-content: center; padding: 20px; background: linear-gradient(135deg, #0f1e3d, #1e40af 55%, #2563eb); }
+  .centro { flex: 1; display: flex; align-items: center; justify-content: center; padding: 20px; background: linear-gradient(135deg, var(--fondo), var(--azul) 70%); }
   .caja { width: 100%; max-width: 380px; background: #fff; border-radius: 24px; padding: 28px; box-shadow: 0 20px 50px rgba(0,0,0,.25); }
   .logo { width: 56px; height: 56px; border-radius: 16px; background: var(--azul2); color: #fff; display: flex; align-items: center; justify-content: center; margin: 0 auto 10px; }
   h1 { font-size: 22px; margin: 0; text-align: center; }
@@ -139,12 +139,30 @@ function llamar(body) {
 }
 function api(action, payload) { return llamar({ fn: 'api', token: E.token, action: action, payload: payload || {} }); }
 
+/* Marca de la empresa (nombre y color configurados en InvenTrack) */
+function aplicarMarca(m) {
+  m = m || {};
+  E.empresa = m.empresa || 'InvenTrack';
+  if (/^#[0-9a-fA-F]{6}$/.test(m.color || '')) {
+    const n = parseInt(m.color.slice(1), 16), osc = function (f) { return 'rgb(' + [(n >> 16) & 255, (n >> 8) & 255, n & 255].map(function (v) { return Math.round(v * f); }).join(',') + ')'; };
+    const st = document.documentElement.style;
+    st.setProperty('--azul', m.color); st.setProperty('--azul2', m.color); st.setProperty('--fondo', osc(0.38));
+    const meta = document.querySelector('meta[name=theme-color]'); if (meta) meta.setAttribute('content', osc(0.38));
+  }
+  document.title = E.empresa + ' · Escáner';
+  try { localStorage.setItem('esc_marca', JSON.stringify(m)); } catch (e) {}
+}
+function cargarMarca() {
+  try { const m = JSON.parse(localStorage.getItem('esc_marca') || 'null'); if (m) aplicarMarca(m); } catch (e) {}
+  if (E.api) llamar({ fn: 'ping' }).then(function (cfg) { if (cfg && cfg.marca) { aplicarMarca(cfg.marca); const h = document.querySelector('h1'); if (h) h.textContent = 'Escáner ' + E.empresa; } }).catch(function () {});
+}
+
 /* =========================================================
  * PANTALLAS
  * ========================================================= */
 function pantallaConfig(msg) {
   $('app').innerHTML = '<div class="pantalla"><div class="centro"><form class="caja" onsubmit="return guardarConfig(event)">' +
-    '<div class="logo">' + icon('logo', 28) + '</div><h1>Escáner InvenTrack</h1><p class="sub">Conecta con tu sistema</p>' +
+    '<div class="logo">' + icon('logo', 28) + '</div><h1>Escáner ' + esc(E.empresa || 'InvenTrack') + '</h1><p class="sub">Conecta con tu sistema</p>' +
     '<label>URL de tu sistema (termina en /exec)</label><input id="cfgApi" type="url" required placeholder="https://script.google.com/macros/s/…/exec" value="' + esc(E.api) + '">' +
     (msg ? '<div class="error">' + esc(msg) + '</div>' : '') +
     '<button class="btn btn-p" id="cfgBtn">Conectar</button>' +
@@ -163,7 +181,7 @@ function guardarConfig(e) {
 
 function pantallaLogin(msg) {
   $('app').innerHTML = '<div class="pantalla"><div class="centro"><form class="caja" onsubmit="return ingresar(event)">' +
-    '<div class="logo">' + icon('logo', 28) + '</div><h1>Escáner InvenTrack</h1><p class="sub">Toma de inventario en vivo</p>' +
+    '<div class="logo">' + icon('logo', 28) + '</div><h1>Escáner ' + esc(E.empresa || 'InvenTrack') + '</h1><p class="sub">Toma de inventario en vivo</p>' +
     '<label>Correo</label><input id="lgEmail" type="email" autocomplete="username" required>' +
     '<label>Contraseña</label><input id="lgPass" type="password" autocomplete="current-password" required>' +
     (msg ? '<div class="error">' + esc(msg) + '</div>' : '') +
@@ -461,6 +479,7 @@ document.addEventListener('visibilitychange', function () {
   if (location.hash) history.replaceState(null, '', location.pathname + location.search); // no deja el token en la barra
   E.api = API_FIJA || h.api || leer('esc_api');
   if (h.api) guardar('esc_api', h.api);
+  cargarMarca();
   E.token = h.t || leer('esc_token');
   if (h.t) guardar('esc_token', h.t);
   if (!E.api) return pantallaConfig();
