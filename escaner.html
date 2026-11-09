@@ -336,10 +336,20 @@ function cargarLibreria() {
 function iniciarH5() {
   const box = document.createElement('div'); box.id = 'h5';
   $('camBox').insertBefore(box, $('camBox').firstChild);
-  E.h5 = new Html5Qrcode('h5', { verbose: false });
+  // iPhone: solo los formatos de códigos de barras que usamos (lee mucho más rápido) y video en alta resolución (barras finas nítidas)
+  const F = window.Html5QrcodeSupportedFormats || {};
+  const formatos = ['CODE_128', 'EAN_13', 'EAN_8', 'UPC_A', 'UPC_E', 'CODE_39', 'CODE_93', 'ITF', 'QR_CODE']
+    .map(function (k) { return F[k]; }).filter(function (v) { return v !== undefined; });
+  E.h5 = new Html5Qrcode('h5', { verbose: false, formatsToSupport: formatos.length ? formatos : undefined,
+    experimentalFeatures: { useBarCodeDetectorIfSupported: true } });
+  const alLeer = function (code) { detectado(code); };
   return E.h5.start({ facingMode: 'environment' },
-    { fps: 12 },   // analiza el cuadro completo: más fiable que limitarlo a una zona
-    function (code) { detectado(code); }, function () {});
+    { fps: 15, videoConstraints: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } } },   // cuadro completo en alta resolución
+    alLeer, function () {})
+    .catch(function () {
+      // si la cámara no acepta alta resolución, se usa la configuración básica
+      return E.h5.start({ facingMode: 'environment' }, { fps: 15 }, alLeer, function () {});
+    });
 }
 
 function detener() {
