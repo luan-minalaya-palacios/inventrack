@@ -417,7 +417,8 @@ function procesarCola() {
     } else if (ultimoOk) {
       pip(true); vibrar(true);
       aviso('✔ ' + esc(ultimoOk.Nombre) + (items.length > 1 ? ' <small>(+' + (items.length - 1) + ' más)</small>' : '') +
-        '<br><small>Contado ' + num(ultimoOk.Cantidad_Escaneada) + ' ' + esc(ultimoOk.Tipo_Unidad) + ' · sistema ' + num(ultimoOk.Cantidad_Sistema) + '</small>', '#047857');
+        (ultimoOk.Serie ? '<br><small>Serie ' + esc(ultimoOk.Serie) + (ultimoOk.Estado_Serie && ultimoOk.Estado_Serie !== 'Disponible' ? ' · ⚠ figuraba como ' + esc(ultimoOk.Estado_Serie) : '') + '</small>' : '') +
+        '<br><small>Contado ' + num(ultimoOk.Cantidad_Escaneada) + ' ' + esc(ultimoOk.Tipo_Unidad) + ' · sistema ' + num(ultimoOk.Cantidad_Sistema) + '</small>', ultimoOk.Estado_Serie && ultimoOk.Estado_Serie !== 'Disponible' ? '#b45309' : '#047857');
     }
   }).catch(function (err) {
     if (/no disponible/i.test(err.message) && !E.sinLotes) {   // sistema sin lotes (versión anterior): una por una
@@ -443,7 +444,7 @@ function pintarUltimos() {
       der = '<span class="pill" style="background:#eff6ff;color:#1d4ed8">+' + num(l.qty) + '</span>';
       sub = 'Contado ' + num(l.r.Cantidad_Escaneada) + ' / sistema ' + num(l.r.Cantidad_Sistema) + ' · <b style="color:' + col + '">' + (d > 0 ? '+' : '') + num(d) + '</b>';
     } else { der = '<span class="pill" style="background:#fff1f2;color:#be123c">Error</span>'; sub = esc(l.error); }
-    return '<div class="lec"><div class="n"><b>' + esc(l.r ? l.r.Nombre : l.code) + '</b><span>' + esc(l.code) + ' · ' + sub + '</span></div>' + der + '</div>';
+    return '<div class="lec"><div class="n"><b>' + esc(l.r ? l.r.Nombre : l.code) + '</b><span>' + (l.r && l.r.Serie ? 'Serie ' : '') + esc(l.code) + ' · ' + sub + '</span></div>' + der + '</div>';
   }).join('') || '<p class="vacio" style="padding:10px">Apunta la cámara a un código de barras.</p>';
 }
 
